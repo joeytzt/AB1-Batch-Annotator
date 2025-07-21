@@ -1,80 +1,65 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>AB1 Sequence Analysis Results</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { 
-            background-color: #f4f6f9; 
-            padding-top: 50px;
-        }
-        .container {
-            background-color: white;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            padding: 30px;
-        }
-        .result-section {
-            background-color: #e9ecef;
-            border-radius: 5px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        pre {
-            max-height: 300px;
-            overflow-y: auto;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>AB1 Sequence Analysis Results</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f4f6f9; padding-top: 50px; }
+    .container { background-color: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 30px; }
+    .result-section { background-color: #e9ecef; border-radius: 5px; padding: 15px; margin-bottom: 20px; }
+    table { width: 100%; }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>AB1 Sequence Analysis Results</h1>
-        
-        <div class="result-section">
-            <h3>Original FASTA Sequence</h3>
-            <pre>{% for header, seq in original_fasta.items() %}{{ header }}
-{{ seq }}
-{% endfor %}</pre>
-        </div>
-        
-        <div class="result-section">
-            <h3>Best Protein Frame</h3>
-            <pre>{{ best_protein }}</pre>
-        </div>
-        
-        <div class="result-section">
-            <h3>Annotation Results</h3>
-            <h4>Regions:</h4>
-            <pre>{{ annotation_data[0] }}</pre>
-            
-            <h4>Number Mapping:</h4>
-            <pre>{{ annotation_data[1] }}</pre>
-        </div>
-        
-        <div class="mt-4">
-            <h3>Download Results</h3>
-            <div class="btn-group" role="group">
-                <a href="{{ url_for('download_file', filename=fasta_file) }}" class="btn btn-primary">
-                    Download Original FASTA
-                </a>
-                <a href="{{ url_for('download_file', filename=best_frame) }}" class="btn btn-success">
-                    Download Best Frame
-                </a>
-                <a href="{{ url_for('download_file', filename=annotation_result) }}" class="btn btn-info">
-                    Download Annotation Results
-                </a>
-                <a href="{{ url_for('download_file', filename=excel_file) }}" class="btn btn-warning">
-                    Download Excel Summary
-                </a>
-                <a href="{{ url_for('download_file', filename=vh_vl_fasta) }}" class="btn btn-secondary">
-                    Download VH/VL FASTA
-                </a>
-            </div>
-            <a href="{{ url_for('upload_file') }}" class="btn btn-secondary mt-3">
-                Process Another File
-            </a>
-        </div>
+  <div class="container">
+    <h1>AB1 Sequence Analysis Results</h1>
+    <div class="result-section">
+      <h3>Summary</h3>
+      <table class="table table-bordered table-sm">
+        <tbody>
+          {% for field, val in result.excel.items() %}
+          <tr>
+            <th>{{ field }}</th>
+            <td>
+              {% if field == 'VH/VL Full Sequence' %}
+                <pre style="margin:0">{{ val }}</pre>
+              {% else %}
+                {{ val }}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
+
+    <div class="result-section">
+      <h3>Download Results</h3>
+      <div class="btn-group" role="group">
+        {% for label, fname in result.outs.items() %}
+          {% if fname != 'N/A' %}
+            <a href="{{ url_for('download_file', filename=fname) }}" class="btn btn-outline-primary">
+              {{ label.replace('_',' ').title() }}
+            </a>
+          {% else %}
+            <button class="btn btn-outline-secondary" disabled>
+              {{ label.replace('_',' ').title() }} (N/A)
+            </button>
+          {% endif %}
+        {% endfor %}
+      </div>
+      <!-- CSV summary -->
+      {% if result.csv %}
+      <div class="mt-3">
+        <a href="{{ url_for('download_file', filename=result.csv) }}" class="btn btn-warning">
+          Download CSV Summary
+        </a>
+      </div>
+      {% endif %}
+    </div>
+
+    <a href="{{ url_for('upload_file') }}" class="btn btn-secondary mt-3">← Process Another File</a>
+  </div>
 </body>
 </html>
