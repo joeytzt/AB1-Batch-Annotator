@@ -4,7 +4,7 @@ from Bio import SeqIO
 import shutil
 import requests
 import pandas as pd
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for
+from flask import Flask, render_template, request, send_file, flash
 from werkzeug.utils import secure_filename
 from datetime import datetime
 
@@ -14,11 +14,9 @@ app.secret_key = 'supersecretkey'
 # Configure upload folder
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'ab1'}
-ALLOWED_FOLDER_EXTENSIONS = {'ab1', ''}  # Allow directories
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 
 # Helper function to find AB1 files recursively
 def find_ab1_files(path):
@@ -29,123 +27,132 @@ def find_ab1_files(path):
                 ab1_files.append(os.path.join(root, file))
     return ab1_files
 
-
-# Reimplementing functions from the original script
 def movingaverage(data_in, window_size):
     window = np.ones(int(window_size)) / float(window_size)
     return np.convolve(data_in, window, 'same')
 
-def process_ab1_file(ab1_file, window_size=10, qual_cutoff=30):
-    # Step 1: Read AB1 file and create fasta and qual files
+def process_ab1_file(ab1_file, window_size=10, qual_cutoff=20):
+    """Reads AB1 and produces trimmed fasta/qual/fa or returns None if below cutoff."""
     sample_seq = SeqIO.read(ab1_file, "abi")
     sample_seq.id = sample_seq.name
-    
-    # Write fasta and qual files
+
     fasta_file = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".fasta")
-    qual_file = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".qual")
-    
+    qual_file  = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".qual")
     SeqIO.write(sample_seq, fasta_file, "fasta")
     SeqIO.write(sample_seq, qual_file, "qual")
-    
-    # Step 2: Trim sequences based on quality
-    sample_qual = SeqIO.read(qual_file, "qual")
-    sample_qual_score = sample_qual.letter_annotations["phred_quality"]
-    sample_qual_MA = np.array(movingaverage(sample_qual_score, window_size))
-    
-    if np.max(sample_qual_MA) > qual_cutoff:
-        qual_above = list(np.where(sample_qual_MA > qual_cutoff))[0]
-        sample_qual_min = np.min(qual_above)
-        sample_qual_max = np.max(qual_above)
-        
-        sample_qual_trim = sample_qual[sample_qual_min:sample_qual_max]
-        sample_seq_trim = sample_seq[sample_qual_min:sample_qual_max]
-        
-        trim_qual_file = os.path.join(UPLOAD_FOLDER, sample_qual.id + ".trim.qual")
-        trim_fasta_file = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".trim.fasta")
-        
-        SeqIO.write(sample_qual_trim, trim_qual_file, "qual")
-        SeqIO.write(sample_seq_trim, trim_fasta_file, "fasta")
-        
-        # Step 3: Create .fa file with the same content as the trimmed .fasta file
-        fa_file = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".fa")
-        shutil.copy(trim_fasta_file, fa_file)
-        
-        return {
-            "fasta": fasta_file,
-            "qual": qual_file,
-            "trim_fasta": trim_fasta_file,
-            "trim_qual": trim_qual_file,
-            "fa": fa_file
-        }
-    else:
-        print(f"The maximum quality score for {sample_qual.id} is below the cutoff ({qual_cutoff})")
-        return None
-    
 
-# Modified processing function for single file
+    sample_qual = SeqIO.read(qual_file, "qual")
+    scores = np.array(movingaverage(sample_qual.letter_annotations["phred_quality"], window_size))
+    if np.max(scores) <= qual_cutoff:
+        return None
+
+    above = np.where(scores > qual_cutoff)[0]
+    lo, hi = np.min(above), np.max(above)
+    trimmed_seq  = sample_seq[lo:hi]
+    trimmed_qual = sample_qual[lo:hi]
+
+    trim_fasta = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".trim.fasta")
+    trim_qual  = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".trim.qual")
+    SeqIO.write(trimmed_seq, trim_fasta, "fasta")
+    SeqIO.write(trimmed_qual, trim_qual, "qual")
+
+    fa_copy = os.path.join(UPLOAD_FOLDER, sample_seq.id + ".fa")
+    shutil.copy(trim_fasta, fa_copy)
+
+    return {
+        "fasta":      fasta_file,
+        "qual":       qual_file,
+        "trim_fasta": trim_fasta,
+        "trim_qual":  trim_qual,
+        "fa":         fa_copy
+    }
+
+# All downstream steps produce full N/A defaults, then overwrite on success:
 def process_single_file(filepath, upload_folder, annotation_scheme):
+    base = os.path.splitext(os.path.basename(filepath))[0]
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Prepare "N/A" defaults
+    excel_data = {
+        'File Name':          os.path.basename(filepath),
+        'Heavy/Light Chain':  'N/A',
+        'VH/VL Full Sequence':'N/A',
+        'CDR1':               'N/A',
+        'CDR2':               'N/A',
+        'CDR3':               'N/A',
+        'Processing Time':    timestamp
+    }
+    output_files = {
+        'output_fasta':       'N/A',
+        'best_frame':         'N/A',
+        'annotation_result':  'N/A',
+        'vh_vl_fasta':        'N/A'
+    }
+
     try:
-        base_name = os.path.splitext(os.path.basename(filepath))[0]
-        fasta_result = process_ab1_file(filepath)
-        
-        if not fasta_result:
-            return None, "Failed to process AB1 file"
-            
-        sequences = read_fasta(fasta_result['fa'])
-        sequences_frames = gen_frames(sequences)
-        proteins = find_prots(sequences_frames)
-        best_protein = list(proteins.values())[0]
-        annotation_obj = annotate(best_protein, annotation_scheme)
-        annotation_result = annotation_obj.retrieve()
-        
-        # Generate output filenames
-        output_files = {
-            'output_fasta': f"{base_name}_output_fasta.fa",
-            'best_frame': f"{base_name}_best_frame.fa",
-            'annotation_result': f"{base_name}_annotation_result.txt",
-            'vh_vl_fasta': f"{base_name}_vh_vl_full_length.fa"
-        }
-        
-        # Save individual files
-        with open(os.path.join(upload_folder, output_files['output_fasta']), 'w') as f:
-            for header, seq in sequences.items():
-                f.write(f"{header}\n{seq}\n")
-        
-        with open(os.path.join(upload_folder, output_files['best_frame']), 'w') as f:
-            f.write(f">{base_name}_Best_Protein_Frame\n{best_protein}\n")
-        
-        with open(os.path.join(upload_folder, output_files['annotation_result']), 'w') as f:
-            f.write(f"Annotation Scheme: {annotation_scheme}\n\n")
-            f.write("Regions:\n")
-            f.write(str(annotation_result[0]) + "\n\n")
-            f.write("Number mapping:\n")
-            f.write(str(annotation_result[1]) + "\n")
-        
-        # Excel data collection
-        chain_type = 'Heavy' if any(k.startswith('H-') for k in annotation_result[0].keys()) else 'Light'
-        cdr1 = annotation_result[0].get(f'{chain_type[0]}-CDR1', '')
-        cdr2 = annotation_result[0].get(f'{chain_type[0]}-CDR2', '')
-        cdr3 = annotation_result[0].get(f'{chain_type[0]}-CDR3', '')
-        full_sequence = ''.join(annotation_result[1].values())
-        
-        excel_data = {
-            'File Name': os.path.basename(filepath),
-            'Heavy/Light Chain': chain_type,
-            'VH/VL Full Sequence': full_sequence,
-            'CDR1': cdr1,
-            'CDR2': cdr2,
-            'CDR3': cdr3,
-            'Processing Time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-        # Save VH/VL FASTA
-        with open(os.path.join(upload_folder, output_files['vh_vl_fasta']), 'w') as f:
-            f.write(f">{base_name}_VHVL\n{full_sequence}\n")
-        
-        return excel_data, output_files
-        
+        # --- Step 1: convert & trim AB1 ---
+        fres = process_ab1_file(filepath)
+        if not fres:
+            raise ValueError("Quality below cutoff")
+
+        # --- Step 2: read & translate & annotate ---
+        from Bio import SeqIO as _SQ  # just to be explicit
+        sequences = read_fasta(fres['fa'])
+        frames    = gen_frames(sequences)
+        prots     = find_prots(frames)
+        best_prot = list(prots.values())[0]
+
+        annotator = annotate(best_prot, annotation_scheme)
+        regions, numbers = annotator.retrieve()
+        # if retrieve() failed it would have printed & regions remain undefined
+
+        # --- Step 3: dump all results to files ---
+        out_fasta = f"{base}_output_fasta.fa"
+        bfasta    = f"{base}_best_frame.fa"
+        anres     = f"{base}_annotation_result.txt"
+        vhvl      = f"{base}_vh_vl_full_length.fa"
+
+        # 3a: original translated sequences
+        with open(os.path.join(upload_folder, out_fasta), 'w') as f:
+            for h,s in sequences.items():
+                f.write(f"{h}\n{s}\n")
+
+        # 3b: best protein frame
+        with open(os.path.join(upload_folder, bfasta), 'w') as f:
+            f.write(f">{base}_Best_Frame\n{best_prot}\n")
+
+        # 3c: annotation dump
+        with open(os.path.join(upload_folder, anres), 'w') as f:
+            f.write(f"Scheme: {annotation_scheme}\n\nRegions:\n{regions}\n\nNumbers:\n{numbers}\n")
+
+        # 3d: VH/VL full sequence
+        chain_type = 'Heavy' if any(k.startswith('H-') for k in regions.keys()) else 'Light'
+        full_seq   = ''.join(numbers.values())
+        with open(os.path.join(upload_folder, vhvl), 'w') as f:
+            f.write(f">{base}_VHVL\n{full_seq}\n")
+
+        # --- Step 4: prepare Excel row ---
+        excel_data.update({
+            'Heavy/Light Chain':   chain_type,
+            'VH/VL Full Sequence': full_seq,
+            'CDR1':                regions.get(f"{chain_type[0]}-CDR1", ''),
+            'CDR2':                regions.get(f"{chain_type[0]}-CDR2", ''),
+            'CDR3':                regions.get(f"{chain_type[0]}-CDR3", '')
+        })
+
+        # --- Step 5: register output filenames ---
+        output_files.update({
+            'output_fasta':      out_fasta,
+            'best_frame':        bfasta,
+            'annotation_result': anres,
+            'vh_vl_fasta':       vhvl
+        })
+
     except Exception as e:
-        return None, str(e)
+        # any failure leaves excel_data & output_files with N/A
+        print(f"Processing {filepath} failed:", e)
+
+    return excel_data, output_files
 
 def read_fasta(fastafile):
     """
@@ -406,6 +413,7 @@ class annotate:
             self.myPage = requests.get(self.url, params=self.d)
             self.text = self.myPage.text
             self.lst = self.text.split()
+            print(self.lst)
                 
             if len(self.lst) > 1:
                 self.chain = self.lst[0][0]
@@ -422,104 +430,84 @@ def allowed_file(filename):
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
-    analysis_results = None
+    single_mode = True
+    single_result = None
     batch_summary = None
-    
+    batch_details = []
+
     if request.method == 'POST':
-        processing_mode = request.form.get('processing_mode', 'single')
-        annotation_scheme = request.form.get('annotation_scheme', 'chothia')
-        all_excel_data = []
-        batch_files = []
-        vhvl_entries = []  # Initialize collection for FASTA entries
-        
-        try:
-            if processing_mode == 'single':
-                # Single file processing
-                file = request.files['file']
-                if file and allowed_file(file.filename):
-                    filename = secure_filename(file.filename)
-                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                    file.save(filepath)
-                    
-                    excel_data, output_files = process_single_file(filepath, app.config['UPLOAD_FOLDER'], annotation_scheme)
-                    if excel_data:
-                        all_excel_data.append(excel_data)
-                        batch_files.append(output_files)
-            
-            elif processing_mode == 'batch':
-                uploaded_files = request.files.getlist('files[]')
-                for file in uploaded_files:
-                    if file and allowed_file(file.filename):
-                        filename = secure_filename(file.filename)
-                        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                        file.save(filepath)
-                        
-                        if os.path.isdir(filepath):
-                            ab1_files = find_ab1_files(filepath)
-                            for ab1_file in ab1_files:
-                                data, outputs = process_single_file(ab1_file, app.config['UPLOAD_FOLDER'], annotation_scheme)
-                                if data:
-                                    all_excel_data.append(data)
-                                    batch_files.append(outputs)
-                                    # Collect FASTA entries
-                                    base_name = os.path.splitext(os.path.basename(ab1_file))[0]
-                                    vhvl_entries.append({
-                                        'base_name': base_name,
-                                        'sequence': data['VH/VL Full Sequence']
-                                    })
-                        else:
-                            data, outputs = process_single_file(filepath, app.config['UPLOAD_FOLDER'], annotation_scheme)
-                            if data:
-                                all_excel_data.append(data)
-                                batch_files.append(outputs)
-                                # Collect FASTA entries
-                                base_name = os.path.splitext(os.path.basename(filepath))[0]
-                                vhvl_entries.append({
-                                    'base_name': base_name,
-                                    'sequence': data['VH/VL Full Sequence']
-                                })
-            
-            # Create output files if any data exists
-            if all_excel_data:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                
-                # 1. Create Excel summary
-                batch_excel_name = f"batch_summary_{timestamp}.xlsx"
-                batch_excel_path = os.path.join(app.config['UPLOAD_FOLDER'], batch_excel_name)
-                pd.DataFrame(all_excel_data).to_excel(batch_excel_path, index=False)
-                
-                # 2. Create consolidated FASTA
-                batch_fasta_name = None
-                if vhvl_entries:
-                    batch_fasta_name = f"batch_vhvl_sequences_{timestamp}.fa"
-                    batch_fasta_path = os.path.join(app.config['UPLOAD_FOLDER'], batch_fasta_name)
-                    with open(batch_fasta_path, 'w') as f:
-                        for entry in vhvl_entries:
-                            f.write(f">{entry['base_name']}\n{entry['sequence']}\n")
-                
-                # Prepare batch summary
-                batch_summary = {
-                    'total_files': len(all_excel_data),
-                    'success_count': len(all_excel_data),
-                    'error_count': 0,
-                    'excel_file': batch_excel_name,
-                    'vhvl_fasta': batch_fasta_name,
-                    'output_files': batch_files
+        mode = request.form.get('processing_mode', 'single')
+        scheme = request.form.get('annotation_scheme', 'chothia')
+        all_excel = []
+        all_outputs = []
+
+        if mode == 'single':
+            single_mode = True
+            f = request.files.get('file')
+            if f and allowed_file(f.filename):
+                fname = secure_filename(f.filename)
+                path  = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+                f.save(path)
+                ed, of = process_single_file(path, app.config['UPLOAD_FOLDER'], scheme)
+                # --- CREATE CSV SUMMARY FOR SINGLE FILE ---
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                csv_name = f"single_summary_{ts}.csv"
+                csv_path = os.path.join(app.config['UPLOAD_FOLDER'], csv_name)
+                pd.DataFrame([ed]).to_csv(csv_path, index=False)
+                single_result = {
+                    'excel': ed,
+                    'outs': of,
+                    'csv': csv_name
                 }
-            
-            analysis_results = {
-                'batch_summary': batch_summary,
-                'individual_results': all_excel_data[:5]
+
+        else:
+            single_mode = False
+            files = request.files.getlist('files[]')
+            for f in files:
+                if f and allowed_file(f.filename):
+                    fname = secure_filename(f.filename)
+                    path  = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+                    f.save(path)
+                    ed, of = process_single_file(path, app.config['UPLOAD_FOLDER'], scheme)
+                    all_excel.append(ed)
+                    all_outputs.append(of)
+
+            # build summary
+            succ = sum(1 for e in all_excel if e['VH/VL Full Sequence'] != 'N/A')
+            err  = len(all_excel) - succ
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            excel_name = f"batch_summary_{timestamp}.xlsx"
+            excel_path = os.path.join(app.config['UPLOAD_FOLDER'], excel_name)
+            pd.DataFrame(all_excel).to_excel(excel_path, index=False)
+
+            # consolidated fasta (only successes)
+            seqs = [ {'base':e['File Name'], 'seq':e['VH/VL Full Sequence']} 
+                     for e in all_excel if e['VH/VL Full Sequence']!='N/A' ]
+            fasta_name = None
+            if seqs:
+                fasta_name = f"batch_vhvl_{timestamp}.fa"
+                with open(os.path.join(app.config['UPLOAD_FOLDER'], fasta_name),'w') as out:
+                    for s in seqs:
+                        out.write(f">{s['base']}\n{s['seq']}\n")
+
+            batch_summary = {
+                'total_files': len(all_excel),
+                'success_count': succ,
+                'error_count': err,
+                'excel_file': excel_name,
+                'vhvl_fasta': fasta_name
             }
-        
-        except Exception as e:
-            flash(f'Batch processing error: {str(e)}')
-    
-    return render_template('upload.html', analysis_results=analysis_results)
+            batch_details = list(zip(all_excel, all_outputs))
+
+    return render_template('upload.html',
+                           single_mode=single_mode,
+                           single_result=single_result,
+                           batch_summary=batch_summary,
+                           batch_details=batch_details)
 
 @app.route('/download/<filename>')
 def download_file(filename):
-    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], filename), 
+    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], filename),
                      as_attachment=True)
 
 if __name__ == '__main__':
