@@ -35,6 +35,7 @@
 </head>
 <body>
     <div class="container">
+        <!-- App description box -->
         <div class="app-description">
             <h1>AB1 Sequence Annotator</h1>
             <p>
@@ -43,156 +44,172 @@
                 extracts the best protein frame, and provides detailed annotations using 
                 different immunoglobulin numbering schemes.
             </p>
-            <p>Key Features:
-                <ul>
-                    <li>Convert AB1 to FASTA</li>
-                    <li>Extract best protein frames</li>
-                    <li>Annotate protein sequences</li>
-                    <li>Download original and processed files</li>
-                </ul>
-            </p>
+            <p><strong>Key Features:</strong></p>
+            <ul>
+                <li>Convert AB1 to FASTA</li>
+                <li>Extract best protein frames</li>
+                <li>Annotate protein sequences</li>
+                <li>Download original and processed files</li>
+            </ul>
         </div>
 
         {% with messages = get_flashed_messages() %}
             {% if messages %}
                 <div class="alert alert-danger">
                     {% for message in messages %}
-                        {{ message }}
+                        {{ message }}<br>
                     {% endfor %}
                 </div>
             {% endif %}
         {% endwith %}
 
         <form method="POST" enctype="multipart/form-data">
-            <!-- Processing Mode Section -->
+            <!-- Processing Mode -->
             <div class="mb-3">
-                <label class="form-label">Processing Mode</label>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="processing_mode" id="single" value="single" checked>
-                    <label class="form-check-label" for="single">
-                        Single File
-                    </label>
+                <label class="form-label">Processing Mode</label><br>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="processing_mode" id="single" value="single" {% if single_mode %}checked{% endif %}>
+                    <label class="form-check-label" for="single">Single File</label>
                 </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="processing_mode" id="batch" value="batch">
-                    <label class="form-check-label" for="batch">
-                        Batch Processing
-                    </label>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="processing_mode" id="batch" value="batch" {% if not single_mode %}checked{% endif %}>
+                    <label class="form-check-label" for="batch">Batch Processing</label>
                 </div>
             </div>
 
-            <!-- File Upload Sections -->
-            <div class="mb-3" id="fileUpload">
+            <!-- File Upload -->
+            <div class="mb-3" id="singleUpload" {% if not single_mode %}style="display:none"{% endif %}>
                 <label for="file" class="form-label">Upload File</label>
                 <input class="form-control" type="file" id="file" name="file" accept=".ab1">
             </div>
-
-            <div class="mb-3" id="batchUpload" style="display: none;">
+            <div class="mb-3" id="batchUpload" {% if single_mode %}style="display:none"{% endif %}>
                 <label for="files" class="form-label">Upload Files/Folders</label>
                 <input class="form-control" type="file" id="files" name="files[]" multiple webkitdirectory directory>
             </div>
 
-            <!-- Annotation Scheme Section -->
+            <!-- Annotation Scheme -->
             <div class="mb-3">
-                <label class="form-label">Select Annotation Scheme</label>
-                <div class="form-check">
+                <label class="form-label">Select Annotation Scheme</label><br>
+                <div class="form-check form-check-inline">
                     <input class="form-check-input" type="radio" name="annotation_scheme" id="chothia" value="chothia" checked>
-                    <label class="form-check-label" for="chothia">
-                        Chothia
-                    </label>
+                    <label class="form-check-label" for="chothia">Chothia</label>
                 </div>
-                <div class="form-check">
+                <div class="form-check form-check-inline">
                     <input class="form-check-input" type="radio" name="annotation_scheme" id="kabat" value="kabat">
-                    <label class="form-check-label" for="kabat">
-                        Kabat
-                    </label>
+                    <label class="form-check-label" for="kabat">Kabat</label>
                 </div>
             </div>
             
             <button type="submit" class="btn btn-primary">Process File</button>
         </form>
 
-        {% if analysis_results %}
+        {% if single_mode and single_result %}
+        <!-- Single‐file Analysis Results -->
         <div class="result-section">
             <h2>Analysis Results</h2>
-            
-            <!-- Single File Results -->
-            {% if analysis_results.original_fasta %}
-            <div class="mb-3">
-                <h3>Original FASTA Sequence</h3>
-                <pre>{% for header, seq in analysis_results.original_fasta.items() %}{{ header }}
-{{ seq }}
-{% endfor %}</pre>
-            </div>
-            
-            <div class="mb-3">
-                <h3>Best Protein Frame</h3>
-                <pre>{{ analysis_results.best_protein }}</pre>
-            </div>
-            
-            <div class="mb-3">
-                <h3>Annotation Results</h3>
-                <h4>Regions:</h4>
-                <pre>{{ analysis_results.annotation_regions }}</pre>
-                
-                <h4>Number Mapping:</h4>
-                <pre>{{ analysis_results.number_mapping }}</pre>
-            </div>
-            {% endif %}
+            <table class="table table-sm">
+                <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                <tbody>
+                {% for field, val in single_result.excel.items() %}
+                    <tr><td>{{ field }}</td><td>{{ val }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
 
-            <!-- Batch Processing Summary -->
-            {% if analysis_results.batch_summary %}
-            <div class="mb-3">
-                <h3>Batch Processing Summary</h3>
-                <p>Processed {{ analysis_results.batch_summary.total_files }} files</p>
-                <p>Successfully analyzed: {{ analysis_results.batch_summary.success_count }}</p>
-                <p>Errors: {{ analysis_results.batch_summary.error_count }}</p>
-            </div>
-            {% endif %}
-
-            <div class="mt-4">
-                <h3>Download Results</h3>
-                <div class="btn-group" role="group">
-                    <!-- Single File Downloads -->
-                    {% if analysis_results.original_fasta %}
-                    <!-- ... (keep single file download buttons unchanged) ... -->
-                    {% endif %}
-
-                    <!-- Batch Download -->
-                    {% if analysis_results.batch_summary %}
-                    <div class="d-flex flex-wrap gap-2">
-                        <a href="{{ url_for('download_file', filename=analysis_results.batch_summary.excel_file) }}" 
-                           class="btn btn-danger">
-                            Download Batch Summary (Excel)
+            <h4>Download Results</h4>
+            <div class="btn-group" role="group">
+                {% for label, fname in single_result.outs.items() %}
+                    {% if fname != 'N/A' %}
+                        <a href="{{ url_for('download_file', filename=fname) }}" class="btn btn-outline-secondary">
+                            {{ label.replace('_',' ').title() }}
                         </a>
-                        {% if analysis_results.batch_summary.vhvl_fasta %}
-                        <a href="{{ url_for('download_file', filename=analysis_results.batch_summary.vhvl_fasta) }}" 
-                           class="btn btn-info">
-                            Download Consolidated FASTA
-                        </a>
-                        {% endif %}
-                    </div>
+                    {% else %}
+                        <button class="btn btn-outline-secondary" disabled>
+                            {{ label.replace('_',' ').title() }} (N/A)
+                        </button>
                     {% endif %}
-                </div>
+                {% endfor %}
+
+                {% if single_result.csv %}
+                    <a href="{{ url_for('download_file', filename=single_result.csv) }}" class="btn btn-outline-secondary">
+                        Download CSV Summary
+                    </a>
+                {% endif %}
             </div>
         </div>
         {% endif %}
+
+        {% if not single_mode and batch_summary %}
+        <!-- Batch Analysis Summary -->
+        <div class="result-section">
+            <h2>Batch Processing Summary</h2>
+            <p>
+                Processed {{ batch_summary.total_files }} files &mdash;
+                Success: {{ batch_summary.success_count }}, Errors: {{ batch_summary.error_count }}
+            </p>
+            <h4>Download Results</h4>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="{{ url_for('download_file', filename=batch_summary.excel_file) }}" class="btn btn-danger">
+                    Download Batch Summary (Excel)
+                </a>
+                {% if batch_summary.vhvl_fasta %}
+                    <a href="{{ url_for('download_file', filename=batch_summary.vhvl_fasta) }}" class="btn btn-info">
+                        Download Consolidated FASTA
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+        <!-- Per‐file details -->
+        {% for excel, outs in batch_details %}
+        <div class="result-section">
+            <h5>{{ excel['File Name'] }}</h5>
+            <table class="table table-sm">
+                <tbody>
+                {% for field, val in excel.items() if field!='File Name' %}
+                    <tr><td>{{ field }}</td><td>{{ val }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <div class="btn-group mb-3">
+                {% for label, fname in outs.items() %}
+                    {% if fname != 'N/A' %}
+                        <a href="{{ url_for('download_file', filename=fname) }}" class="btn btn-outline-secondary btn-sm">
+                            {{ label.replace('_',' ').title() }}
+                        </a>
+                    {% else %}
+                        <button class="btn btn-outline-secondary btn-sm" disabled>
+                            {{ label.replace('_',' ').title() }} (N/A)
+                        </button>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+        {% endif %}
     </div>
 
-
-    <!-- JavaScript for Upload Toggle -->
     <script>
-    document.querySelectorAll('input[name="processing_mode"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            if (e.target.value === 'single') {
-                document.getElementById('fileUpload').style.display = 'block';
-                document.getElementById('batchUpload').style.display = 'none';
-            } else {
-                document.getElementById('fileUpload').style.display = 'none';
-                document.getElementById('batchUpload').style.display = 'block';
-            }
+        // toggle single/batch
+        document.querySelectorAll('input[name="processing_mode"]').forEach(radio => {
+            radio.addEventListener('change', e => {
+                if (e.target.value === 'single') {
+                    document.getElementById('singleUpload').style.display = 'block';
+                    document.getElementById('batchUpload').style.display = 'none';
+                } else {
+                    document.getElementById('singleUpload').style.display = 'none';
+                    document.getElementById('batchUpload').style.display = 'block';
+                }
+            });
         });
-    });
+
+        // clear results on new upload
+        function clearResults() {
+            document.querySelectorAll('.result-section').forEach(el => {
+                el.style.display = 'none';
+            });
+        }
+        document.getElementById('file').addEventListener('change', clearResults);
+        document.getElementById('files').addEventListener('change', clearResults);
     </script>
 </body>
 </html>
