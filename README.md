@@ -3,7 +3,7 @@
 ## Installation
 1. Clone the repository
 ```bash
-git clone https://github.com/HaroonMH/AB1-Batches-Sequence-Annotator.git
+git clone https://github.com/joeytzt/AB1-Batch-Annotator.git
 cd AB1-Batches-Sequence-Annotator
 ```
 
